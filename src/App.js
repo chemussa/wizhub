@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch, query, where } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch, query, where, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 
 // ── Firebase Config ── Replace YOUR_* values from Firebase Console → Project Settings ──
 const firebaseConfig = {
@@ -32,6 +32,25 @@ function userRef(email){ return doc(fdb,"users",email.toLowerCase()); }
 async function getUser(email){ try{ const s=await getDoc(userRef(email)); return s.exists()?s.data():null; }catch{ return null; } }
 async function updateUser(user){ await setDoc(userRef(user.email),user,{merge:true}); }
 async function getAllUsers(){ const s=await getDocs(collection(fdb,"users")); return s.docs.map(d=>d.data()); }
+// ── Withdrawal Helpers ─────────────────────────────────────────────────
+async function submitWithdrawal(user,amount,wallet){
+  const req={id:Date.now().toString(),email:user.email,name:user.name,amount:parseFloat(amount),wallet:wallet.trim(),status:"pending",createdAt:new Date().toISOString()};
+  await setDoc(doc(fdb,"withdrawals",req.id),req);
+  return req;
+}
+async function getAllWithdrawals(){
+  const s=await getDocs(collection(fdb,"withdrawals"));
+  return s.docs.map(d=>d.data()).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+}
+async function approveWithdrawal(req){
+  await updateDoc(doc(fdb,"withdrawals",req.id),{status:"approved",processedAt:new Date().toISOString()});
+  const u=await getUser(req.email);
+  if(u){await updateDoc(userRef(req.email),{balance:parseFloat(Math.max(0,(u.balance||0)-req.amount).toFixed(2))});}
+}
+async function rejectWithdrawal(req){
+  await updateDoc(doc(fdb,"withdrawals",req.id),{status:"rejected",processedAt:new Date().toISOString()});
+}
+
 
 const VIP_PLANS=[
   {name:"VIP-1",price:"10 USDT",amount:10,daily:"2.90",rate:"29%",total:"145.00",days:50,tasks:1,l1:"16%",l2:"3%",l3:"1%"},
@@ -324,7 +343,9 @@ function AdminPanel({onLogout}){
   const [search,setSearch]=useState("");
   const [sel,setSel]=useState(null);
   const [loading,setLoading]=useState(true);
-  const refresh=async()=>{setLoading(true);const all=await getAllUsers();setUsers(all);setLoading(false);};
+  const [withdrawals,setWithdrawals]=useState([]);
+  const refreshWithdrawals=async()=>{const ws=await getAllWithdrawals();setWithdrawals(ws);};
+  const refresh=async()=>{setLoading(true);const all=await getAllUsers();setUsers(all);await refreshWithdrawals();setLoading(false);};
   useEffect(()=>{refresh();},[]);
   const all=users;
   const pending=all.filter(u=>!u.activePlan);
@@ -352,7 +373,7 @@ function AdminPanel({onLogout}){
         ))}
       </div>
       <div style={{display:"flex",gap:8,padding:"0 16px 12px",overflowX:"auto"}}>
-        {[{id:"dashboard",l:"📊 Overview"},{id:"users",l:"👥 Users"},{id:"pending",l:`⏳ Pending (${pending.length})`},{id:"activate",l:"💳 Activate"}].map(t=>(
+        {[{id:"dashboard",l:"📊 Overview"},{id:"users",l:"👥 Users"},{id:"pending",l:`⏳ Pending (${pending.length})`},{id:"activate",l:"💳 Activate"},{id:"withdrawals",l:`💸 Withdrawals (${withdrawals.filter(w=>w.status==="pending").length})`}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{whiteSpace:"nowrap",padding:"7px 14px",borderRadius:20,border:"none",fontWeight:700,fontSize:11,cursor:"pointer",background:tab===t.id?"#2563eb":"rgba(255,255,255,0.1)",color:"#fff"}}>{t.l}</button>
         ))}
       </div>
@@ -398,11 +419,40 @@ function AdminPanel({onLogout}){
           ))
         )}
       </div>
+      {tab==="withdrawals"&&(withdrawals.length===0?
+        <div style={{textAlign:"center",padding:40,color:"#fff"}}><p style={{fontSize:32}}>💸</p><p>No withdrawal requests yet</p></div>:
+        <div style={{padding:"0 16px 80px"}}>
+          {withdrawals.map((w,i)=>(
+            <div key={i} style={{background:"#1e3a8a",borderRadius:16,padding:16,marginBottom:10,color:"#fff"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div>
+                  <p style={{margin:0,fontWeight:700,fontSize:14}}>{w.name}</p>
+                  <p style={{margin:0,opacity:0.6,fontSize:11}}>{w.email}</p>
+                  <p style={{margin:"4px 0 0",color:"#4ade80",fontWeight:900,fontSize:18}}>{w.amount} USDT</p>
+                </div>
+                <span style={{background:w.status==="pending"?"#f59e0b":w.status==="approved"?"#16a34a":"#dc2626",color:"#fff",padding:"4px 12px",borderRadius:20,fontSize:11,fontWeight:700,textTransform:"uppercase"}}>{w.status}</span>
+              </div>
+              <div style={{background:"rgba(255,255,255,0.08)",borderRadius:10,padding:"8px 12px",marginBottom:10}}>
+                <p style={{margin:0,fontSize:10,opacity:0.6}}>Wallet Address</p>
+                <p style={{margin:"2px 0 0",fontSize:11,fontFamily:"monospace",wordBreak:"break-all"}}>{w.wallet}</p>
+              </div>
+              <p style={{margin:"0 0 8px",fontSize:10,opacity:0.5}}>{new Date(w.createdAt).toLocaleString()}</p>
+              {w.status==="pending"&&(
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={async()=>{if(!window.confirm("Approve this withdrawal?"))return;await approveWithdrawal(w);await refreshWithdrawals();}} style={{flex:1,background:"#16a34a",color:"#fff",border:"none",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>✅ Approve</button>
+                  <button onClick={async()=>{if(!window.confirm("Reject this withdrawal?"))return;await rejectWithdrawal(w);await refreshWithdrawals();}} style={{flex:1,background:"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>❌ Reject</button>
+                </div>
+              )}
+              {w.status!=="pending"&&<p style={{margin:0,fontSize:11,opacity:0.5}}>Processed: {w.processedAt?new Date(w.processedAt).toLocaleString():"—"}</p>}
+            </div>
+          ))}
+        </div>
+      )}
       {sel&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:100}}>
           <div style={{background:"#1e3a8a",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0}}>👤 {sel.name}</h3><button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}}>✕</button></div>
-            {[["Email",sel.email],["Code",sel.code],["Plan",sel.activePlan?.name||"None"],["Balance",`${(sel.balance||0).toFixed(2)} USDT`],["Earned",`${(sel.totalEarned||0).toFixed(2)} USDT`],["Ref Bonus",`${(sel.refEarnings||0).toFixed(2)} USDT`],["Ref Code Used",sel.refCodeSaved||"None"]].map(([k,v],i)=>(
+            {[["Email",sel.email],["Code",sel.code],["Plan",sel.activePlan?.name||"None"],["Balance",`${(sel.balance||0).toFixed(2)} USDT`],["Earned",`${(sel.totalEarned||0).toFixed(2)} USDT`],["Ref Bonus",`${(sel.refEarnings||0).toFixed(2)} USDT`],["Ref Code Used",sel.refCodeSaved||"None"],["💳 Wallet",sel.withdrawAddress||"Not set"]].map(([k,v],i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",background:"rgba(255,255,255,0.1)",borderRadius:8,padding:"8px 12px",marginBottom:6}}>
                 <span style={{fontSize:12,opacity:0.7}}>{k}</span><span style={{fontSize:12,fontWeight:700}}>{v}</span>
               </div>
@@ -414,6 +464,7 @@ function AdminPanel({onLogout}){
               {VIP_PLANS.map((v,i)=><button key={i} onClick={()=>activatePlan(sel.email,v)} style={{background:sel.activePlan?.name===v.name?"#065f46":"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"6px 0",fontSize:10,fontWeight:700,cursor:"pointer"}}>{sel.activePlan?.name===v.name?"✅":""} {v.name}</button>)}
             </div>
             {sel.activePlan&&<button onClick={()=>deactivatePlan(sel.email)} style={{width:"100%",background:"rgba(239,68,68,0.2)",color:"#f87171",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:12,cursor:"pointer",marginBottom:6}}>❌ Deactivate</button>}
+            {sel.withdrawAddress&&<button onClick={()=>{navigator.clipboard.writeText(sel.withdrawAddress);alert("✅ Wallet address copied!");}} style={{width:"100%",background:"rgba(34,197,94,0.2)",color:"#4ade80",border:"1px solid rgba(34,197,94,0.3)",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:12,cursor:"pointer",marginBottom:6}}>📋 Copy Wallet Address</button>}
             <button onClick={()=>deleteUser(sel.email)} style={{width:"100%",background:"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:12,cursor:"pointer"}}>🗑 Delete User</button>
           </div>
         </div>
@@ -436,6 +487,12 @@ export default function WIZhubApp(){
   const [showAnnouncement,setShowAnnouncement]=useState(true);
   const [expanded,setExpanded]=useState(0);
   const [memberIdx,setMemberIdx]=useState(0);
+  const [showWithdraw,setShowWithdraw]=useState(false);
+  const [withdrawAddr,setWithdrawAddr]=useState("");
+  const [withdrawAmt,setWithdrawAmt]=useState("");
+  const [savingAddr,setSavingAddr]=useState(false);
+  const [withdrawing,setWithdrawing]=useState(false);
+  const [withdrawSuccess,setWithdrawSuccess]=useState(false);
 
   useEffect(()=>{
     if(sessionStorage.getItem("wiz_admin")==="true"){setIsAdmin(true);return;}
@@ -448,6 +505,7 @@ export default function WIZhubApp(){
     return()=>unsub();
   },[]);
   useEffect(()=>{const t=setInterval(()=>setMemberIdx(i=>(i+1)%FAKE_MEMBERS.length),2500);return()=>clearInterval(t);},[]);
+  useEffect(()=>{if(user?.withdrawAddress)setWithdrawAddr(user.withdrawAddress);},[user?.email]);
 
   const today=todayStr();
   const taskLog=user?.taskLog||{};
@@ -959,10 +1017,7 @@ export default function WIZhubApp(){
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
             {[
               {icon:"💰",label:"Recharge",action:()=>setSelectedPlan(VIP_PLANS[0])},
-              {icon:"📤",label:"Withdraw",action:()=>{
-                const msg=encodeURIComponent(`Hello WIZhub Support! 👋\nI want to withdraw my earnings.\nName: ${user.name}\nEmail: ${user.email}\nBalance: ${(user.balance||0).toFixed(2)} USDT\nWallet address: [paste your wallet here]`);
-                window.open(`https://t.me/${TELEGRAM}?text=${msg}`,"_blank");
-              }},
+              {icon:"📤",label:"Withdraw",action:()=>setShowWithdraw(true)},
               {icon:"👤",label:"Account",action:()=>{}},
               {icon:"📊",label:"Financial records",action:()=>{}},
             ].map((b,i)=>(
@@ -1060,6 +1115,66 @@ export default function WIZhubApp(){
           </button>
         ))}
       </div>
+
+      {/* Withdraw Modal */}
+      {showWithdraw&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:100}}>
+          <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",color:"#1e293b"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,color:"#1e56db",fontSize:17}}>📤 Withdraw</h3>
+              <button onClick={()=>{setShowWithdraw(false);setWithdrawSuccess(false);}} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8"}}>✕</button>
+            </div>
+            <p style={{margin:"0 0 4px",color:"#f59e0b",fontSize:12,fontWeight:600}}>🕐 24 hours withdrawal</p>
+            <div style={{background:"linear-gradient(135deg,#eff6ff,#dbeafe)",borderRadius:14,padding:16,textAlign:"center",marginBottom:16}}>
+              <p style={{margin:0,color:"#64748b",fontSize:12}}>Total balance</p>
+              <p style={{margin:"4px 0",fontSize:32,fontWeight:900,color:"#1e56db"}}>{(user.balance||0).toFixed(4)} USDT</p>
+            </div>
+            <div style={{marginBottom:14}}>
+              <p style={{margin:"0 0 6px",fontSize:12,color:"#64748b",fontWeight:600}}>Withdrawal Amount (USDT)</p>
+              <input value={withdrawAmt} onChange={e=>setWithdrawAmt(e.target.value)} placeholder="Enter amount to withdraw" type="number" style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px",fontSize:14,color:"#1e293b",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div style={{marginBottom:16}}>
+              <p style={{margin:"0 0 6px",fontSize:12,color:"#64748b",fontWeight:600}}>Your Wallet Address (BEP20 / TRC20)</p>
+              <input value={withdrawAddr} onChange={e=>setWithdrawAddr(e.target.value)} placeholder="Enter your crypto wallet address" style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px",fontSize:12,fontFamily:"monospace",color:"#1e293b",outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+              <button onClick={async()=>{
+                if(!withdrawAddr.trim()){alert("Please enter a wallet address first.");return;}
+                setSavingAddr(true);
+                const updated={...user,withdrawAddress:withdrawAddr.trim()};
+                await updateUser(updated);setUser(updated);
+                setSavingAddr(false);
+                alert("✅ Wallet address saved successfully!");
+              }} style={{background:"#eff6ff",color:"#1e56db",border:"1px solid #bfdbfe",borderRadius:8,padding:"8px 16px",fontWeight:600,fontSize:12,cursor:"pointer"}}>
+                {savingAddr?"Saving...":"💾 Save Address"}
+              </button>
+              {user.withdrawAddress&&<p style={{margin:"6px 0 0",fontSize:11,color:"#16a34a"}}>✅ Saved: {user.withdrawAddress.slice(0,20)}...</p>}
+            </div>
+            {withdrawSuccess?(
+              <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:12,padding:20,textAlign:"center",marginBottom:12}}>
+                <p style={{color:"#16a34a",fontWeight:700,fontSize:18,margin:"0 0 4px"}}>✅ Request Submitted!</p>
+                <p style={{color:"#4b5563",fontSize:13,margin:0}}>Your withdrawal is pending admin approval. You will be notified within 24 hours.</p>
+              </div>
+            ):(
+              <button onClick={async()=>{
+                if(!withdrawAddr.trim()){alert("Please enter your wallet address.");return;}
+                if(!withdrawAmt||parseFloat(withdrawAmt)<=0){alert("Please enter a valid amount.");return;}
+                if(parseFloat(withdrawAmt)>(user.balance||0)){alert("Insufficient balance.");return;}
+                setWithdrawing(true);
+                try{
+                  await submitWithdrawal(user,withdrawAmt,withdrawAddr);
+                  const updated={...user,withdrawAddress:withdrawAddr.trim()};
+                  await updateUser(updated);setUser(updated);
+                  setWithdrawSuccess(true);
+                  setWithdrawAmt("");
+                }catch(e){alert("Error: "+e.message);}
+                setWithdrawing(false);
+              }} disabled={withdrawing} style={{width:"100%",background:"linear-gradient(135deg,#1e56db,#2563eb)",color:"#fff",border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer",boxShadow:"0 4px 20px rgba(30,86,219,0.4)",opacity:withdrawing?0.7:1}}>
+                {withdrawing?"⏳ Submitting...":"📤 Submit Withdrawal Request"}
+              </button>
+            )}
+            <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:10,marginBottom:0}}>⏱ Processing within 24 hours after admin approval.</p>
+          </div>
+        </div>
+      )}
 
       {/* Payment Modal */}
       {selectedPlan&&(
