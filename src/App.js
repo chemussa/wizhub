@@ -19,7 +19,6 @@ const fdb = getFirestore(firebaseApp);
 
 const WALLET_USDT = "0xb1847000dd44d73f5810e77abf58e43533bb0c61";
 const WALLET_BTC = "0xb1847000dd44d73f5810e77abf58e43533bb0c61";
-const TELEGRAM = "Wizhub";
 const ADMIN_EMAIL = "admin@wizhub.com";
 const ADMIN_PASS = "WizAdmin@2025";
 const GRID = 15; const CELL = 18; const GAME_SPEED = 150; const TARGET = 5;
@@ -329,7 +328,7 @@ function AuthScreen({onAuth}){
         <button onClick={handle} disabled={loading} style={{width:"100%",marginTop:14,background:"linear-gradient(135deg,#1e56db,#2563eb)",color:"#fff",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer",boxShadow:"0 4px 20px rgba(30,86,219,0.4)"}}>
           {loading?"Please wait...":mode==="login"?"🔑 Login to Account":"🚀 Create Account"}
         </button>
-        <p style={{textAlign:"center",margin:"10px 0 0"}}><button onClick={()=>window.open(`https://t.me/${TELEGRAM}`,"_blank")} style={{background:"none",border:"none",color:"rgba(255,255,255,0.5)",fontSize:12,cursor:"pointer"}}>Need help? Contact Support ✈️</button></p>
+        <p style={{textAlign:"center",margin:"10px 0 0",color:"rgba(255,255,255,0.4)",fontSize:12}}>Need help? Contact admin@wizhub.com</p>
       </div>
       <div style={{height:20}}/>
       <style>{`@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}`}</style>
@@ -515,7 +514,7 @@ export default function WIZhubApp(){
 
   const walletAddr=payMethod==="BTC"?WALLET_BTC:WALLET_USDT;
   const handleCopy=()=>{navigator.clipboard.writeText(walletAddr);setCopied(true);setTimeout(()=>setCopied(false),2000);};
-  const handleTelegram=()=>{const msg=encodeURIComponent(`Hello WIZhub Support! 👋\nI sent ${selectedPlan?.price} via ${payMethod} for ${selectedPlan?.name}.\nEmail: ${user?.email}\nName: ${user?.name}\nTxID: [paste here]`);window.open(`https://t.me/${TELEGRAM}?text=${msg}`,"_blank");};
+
   const handleTaskComplete=async()=>{
     const amt=parseFloat(activePlan.daily);
     const updated={...user,balance:parseFloat((user.balance+amt).toFixed(2)),totalEarned:parseFloat((user.totalEarned+amt).toFixed(2)),taskLog:{...user.taskLog,[today]:{done:true,reward:activePlan.daily}}};
@@ -613,7 +612,7 @@ export default function WIZhubApp(){
 
           {/* Actions */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            {[{i:"💰",l:"Recharge",a:()=>setSelectedPlan(VIP_PLANS[0])},{i:"📤",l:"Withdraw",a:()=>window.open(`https://t.me/${TELEGRAM}`,"_blank")},{i:"📋",l:"Tasks",a:()=>setTab("Task")},{i:"💎",l:"VIP Plans",a:()=>setTab("VIP")}].map((b,i)=>(
+            {[{i:"💰",l:"Recharge",a:()=>setSelectedPlan(VIP_PLANS[0])},{i:"📤",l:"Withdraw",a:()=>setShowWithdraw(true)},{i:"📋",l:"Tasks",a:()=>setTab("Task")},{i:"💎",l:"VIP Plans",a:()=>setTab("VIP")}].map((b,i)=>(
               <button key={i} onClick={b.a} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:14,padding:"14px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:5,cursor:"pointer",color:"#fff"}}>
                 <span style={{fontSize:22}}>{b.i}</span><span style={{fontSize:12,fontWeight:600}}>{b.l}</span>
               </button>
@@ -771,7 +770,7 @@ export default function WIZhubApp(){
                 </div>
                 <button onClick={()=>{
                   const msg=encodeURIComponent(`Hello WIZhub Support! 👋\nI want to pay the task fee of $${taskTaxAmount} USDT to unlock my next task.\nEmail: ${user?.email}\nName: ${user?.name}\nTask number: ${completedTasks+1}\nPlease help me activate.\nTxID: [paste here]`);
-                  window.open(`https://t.me/${TELEGRAM}?text=${msg}`,"_blank");
+                  // Telegram removed - admin handles via panel
                 }} style={{width:"100%",background:"#1e56db",color:"#fff",border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer"}}>Recharge</button>
                 <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:8}}>Pay ${taskTaxAmount} USDT task fee to unlock today's task</p>
               </div>
@@ -837,7 +836,7 @@ export default function WIZhubApp(){
               {[
                 {icon:"𝕏",bg:"#000",action:()=>window.open(`https://twitter.com/intent/tweet?text=${shareMsg}`,"_blank")},
                 {icon:"f",bg:"#1877f2",action:()=>window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(refLink)}`,"_blank")},
-                {icon:"✈",bg:"#2ca5e0",action:()=>window.open(`https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${shareMsg}`,"_blank")},
+                {icon:"📋",bg:"#1e56db",action:()=>{navigator.clipboard.writeText(refLink);alert("✅ Referral link copied!");}},
                 {icon:"in",bg:"#0077b5",action:()=>window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(refLink)}`,"_blank")},
                 {icon:"📞",bg:"#25d366",action:()=>window.open(`https://wa.me/?text=${shareMsg}`,"_blank")},
                 {icon:"📸",bg:"linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)",action:()=>{}},
@@ -1063,7 +1062,7 @@ export default function WIZhubApp(){
             ))}
           </div>
 
-          <button onClick={()=>window.open(`https://t.me/${TELEGRAM}`,"_blank")} style={{width:"100%",background:"linear-gradient(135deg,#1e56db,#2563eb)",color:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 15px rgba(30,86,219,0.3)"}}>✈️ Contact Support on Telegram</button>
+          <div style={{background:"#eff6ff",borderRadius:12,padding:"13px 0",textAlign:"center",color:"#1e56db",fontWeight:700,fontSize:14}}>📧 Support: admin@wizhub.com</div>
         </div>
       )}
 
@@ -1216,9 +1215,9 @@ export default function WIZhubApp(){
               <p style={{margin:0}}>1️⃣ Copy wallet address above</p>
               <p style={{margin:0}}>2️⃣ Send exactly {selectedPlan.price}</p>
               <p style={{margin:0}}>3️⃣ Copy your Transaction ID (TxID)</p>
-              <p style={{margin:0}}>4️⃣ Send proof on Telegram below</p>
+              <p style={{margin:0}}>4️⃣ Admin will activate your plan within 30 minutes</p>
             </div>
-            <button onClick={handleTelegram} style={{width:"100%",background:"linear-gradient(135deg,#1e56db,#2563eb)",color:"#fff",border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer",boxShadow:"0 4px 20px rgba(30,86,219,0.4)"}}>✈️ Send Payment Proof on Telegram</button>
+            <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:12,padding:14,textAlign:"center"}}><p style={{margin:0,color:"#16a34a",fontWeight:700,fontSize:14}}>✅ After payment, admin will activate your plan automatically within 30 minutes.</p><p style={{margin:"6px 0 0",color:"#64748b",fontSize:12}}>Contact: admin@wizhub.com</p></div>
             <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:10,marginBottom:0}}>✅ Activated within 5–30 minutes after confirmation.</p>
           </div>
         </div>
